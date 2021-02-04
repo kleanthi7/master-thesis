@@ -1,0 +1,144 @@
+#! /bin/bash
+
+
+#The fasta files downloaded from ftp://ftp.ncbi.nlm.nih.gov/refseq/release/viral  are viral.1.protein.faa and  viral.2.protein.faa, which contain #totally 477258 protein sequences. We created a tab separated file that contained all the viral proteins with the following information in columns: #official protein name, protein accession id (refseq id), the taxonomic id (tax id) of the species that contains the protein, its full lineage, #according to the ncbi and the whole protein sequence. In order to make the above file the following commands were used in bash(linux) and python:
+
+#repeat commands for the two fasta files or make them into one
+#grep the names from the fasta file
+grep '>' viral.2.protein.faa > refids.txt
+#keep only the ref ids
+cut -d' ' -f1 refids.txt > refids.txt
+#remove > chars
+sed 's/>//' refids.txt > onlyprotids.tab
+#find the taxids from the protein accessions and keep the lineage
+grep -Fwf dream2.tab prot.accession2taxid > sequence2taxid_viral_prot.tab
+cut -f 3 sequence2taxid_viral_prot.tab > viral_taxids_only.txt
+cat /home/user/kl_new_viral_proteins_db/new_taxdump/fullnamelineage.dmp | tr -d "\t" > fullnamelineagenotabs.dmp
+awk -F'|' 'FNR==NR{a[$1]=$2FS$3; next} ($1 in a){print $0,a[$1]}' fullnamelineagenotabs.dmp viral_taxids_only.txt > taxandfull.tab
+cut -f 2 sequence2taxid_viral_prot.tab >refseqids_only.txt
+pasterefseqids_only.txt taxandfull.tab  > refseqidsandtaxids.txt
+#continue with python
+
+lastdb -p ViralDB ViralProt.fa
+#run last using PAM30 substitution matrix and keep sequences that have 70% similarity in 80% of their sequences length
+lastal -p PAM30 -P 8 -f blasttab+ ViralDB ViralProt.fa | awk '{ if ( $1!~/^#/ &&  $3>=70 && $1!=$2 && $14!=0 && $13!=0 &&  ($4-$6)/($13)>=0.8 && ($4-$6)/($14) >=0.8 ) print ($1"\t"$2)  }' | perl -lane 'print if !$seen{join(" ", sort @F)}++' > mcl_input.txt
+
+#The final file has organized all the sequences in a similarity network. The network contained 
+#1069887 links and 308975 nodes.
+
+#find the links
+wc -l mcl_input.txt
+#find the nodes
+cut -f1 mcl_input.txt >tmp1
+cut -f2 mcl_input.txt >tmp2
+cat tmp1 tmp2 | sort -u | wc -l
+
+# Next, the similarity network was used as input in the mcl clustering algorithm to create protein clusters. The output file by the mcl algorithm #contained 68,446 clusters(protein families).
+mcl mcl_input.txt --abc -o mcl_viral_clusters.out
+# The new file that contains the families which contain more than 20 proteins is VIRAL_FAMILIES_20.txt. It contains the protein ids and the family #they belong to, their taxonomic lineage and their sequence. 
+
+# It is important to check if the sequences in families are being repeated. Therefore, all the protein sequences need to be aligned, using #ClustalOmega suite, and then a consensus sequence of each family alignment can be created using biopython suite. The consensus sequences can be #compared with each other in order to exclude or concatenate identical parts. The comparison is done using sequence alignment with last algorithm and #a similarity matrix of all the sequences. For the comparison to be effective, strict similarity parameters were used. (98% similarity on 90% of the #sequences.)
+ 
+for f in /home/user/kl_new_viral_proteins_db/clustal_omega_input/cluster*.fa; do  ./clustalo-1.2.4-Ubuntu-x86_64 -i $f -o ${f}_omega_output.fa -v; done
+python3 create_consensus.py clustal_output_original.txt > clustal_output_con.fa
+
+lastdb -p ClustConsenus clustal_output_consensus.fa
+#run last using PAM30 substitution matrix and keep sequences that have 98% similarity in 90% of their sequences length
+#this is that strict because we want to know is there is redudancy. 
+lastal -p PAM30 -P 8 -f blasttab+ ClustConsenus clustal_output_consensus.fa | awk '{ if ( $1!~/^#/ &&  $3>=98 && $1!=$2 && $14!=0 && $13!=0 &&  ($4-$6)/($13)>=0.9 && ($4-$6)/($14) >=0.9 ) print ($1"\t"$2)  }' | perl -lane 'print if !$seen{join(" ", sort @F)}++' > mcl_input_clust_consensus.txt
+
+#The output file(mcl_input_clust_consensus.txt) showed that the consensus sequences of the families were not repeated in other protein families’ #consensus sequences, therefore the consensus sequences of the protein families are non-redundant. 
+
+
+
+
+./FastaToTbl.sh viral.1.protein.faa > viral.1.protein.tab
+
+cat /home/user/kl_new_viral_proteins_db/new_taxdump/fullnamelineage.dmp | tr -d "\t" > fullnamelineagenotabs.dmp
+
+
+awk -F'|' 'FNR==NR{a[$1]=$2FS$3; next} ($1 in a){print $0,a[$1]}' fullnamelineagenotabs.dmp kl_viral_taxids_only.txt > kl_4taxandfull.tab
+#bash:
+paste kl_refseqidsonly.txt kl_4taxandfull.tab  > klrefseqidsandtaxids.txt
+#grep the names from the fasta file
+grep '>' viral.2.protein.faa > krefids2.txt
+#keep only the ref ids
+cut -d' ' -f1 krefids2.txt > k2refids2.txt
+#remove > chars
+sed 's/>//' k2refids2.txt > dream2.tab
+#repeat the above process to get the taxids in order to find the lineage
+grep -Fwf dream2.tab prot.accession2taxid > kl2_sequence2taxid_viral_prot.tab
+# 209 sequences less
+cut -f 3 kl2_sequence2taxid_viral_prot.tab > kl2_viral_taxids_only.txt
+awk -F'|' 'FNR==NR{a[$1]=$2FS$3; next} ($1 in a){print $0,a[$1]}' fullnamelineagenotabs.dmp kl2_viral_taxids_only.txt > kl_24taxandfull.tab
+cut -f 2 kl2_sequence2taxid_viral_prot.tab > kl2refseqids_only.txt
+paste kl2refseqids_only.txt kl_24taxandfull.tab  > kl2refseqidsandtaxids.txt
+#continue in python notebook
+
+#use the LAST software to find the similarity matrix to put as input in mcl clustering algorithm
+lastdb -p ViralDB ViralProt.fa
+
+lastal -p PAM30 -P 8 -f blasttab+ ViralDB ViralProt.fa | awk '{ if ( $1!~/^#/ &&  $3>=70 && $1!=$2 && $14!=0 && $13!=0 &&  ($4-$6)/($13)>=0.8 && ($4-$6)/($14) >=0.8 ) print ($1"\t"$2)  }' | perl -lane 'print if !$seen{join(" ", sort @F)}++' > mcl_input.txt
+
+
+mcl mcl_input.txt --abc -o mcl_viral_clusters.out
+
+
+for f in /home/user/kl_new_viral_proteins_db/clustal_omega_input/cluster*.fa; do  ./clustalo-1.2.4-Ubuntu-x86_64 -i $f -o ${f}_omega_output.fa -v; done
+
+python3 create_consensus.py clustal_output_original.txt > clustal_output_con.fa
+lastdb -p ClustConsenus clustal_output_consensus.fa
+
+
+lastal -p PAM30 -P 8 -f blasttab+ ClustConsenus clustal_output_consensus.fa | awk '{ if ( $1!~/^#/ &&  $3>=98 && $1!=$2 && $14!=0 && $13!=0 &&  ($4-$6)/($13)>=0.9 && ($4-$6)/($14) >=0.9 ) print ($1"\t"$2)  }' | perl -lane 'print if !$seen{join(" ", sort @F)}++' > mcl_input_clust_consensus.txt
+
+for f in *_output.fa;
+do
+hmmbuild --amino /home/user/kl_new_viral_proteins_db/hmmer_output/hmm_${f}  $f 2>&1 | tee k_hmm_log.txt;
+done
+
+
+#Take the viral_clusters_20.txt and replace protein names with taxids. 
+
+cut -f3,4 ViralProt.csv > protein_name_taxid.csv
+cut -f1,2 VIRAL_FAMILIES_20.txt > cluster_id_protein_name.csv
+
+
+#mmseqs2 algorithm to classify the metagenomes 
+./mmseqs databases UniRef100 /home/user/mmseqs/protein_db /home/user/mmseqs/tmp
+
+./mmseqs createdb /home/user/mmseqs/metage.fa /home/user/mmseqs/queryDB
+
+./mmseqs taxonomy --tax-lineage 1 /home/user/mmseqs/queryDB /home/user/mmseqs/protein_db /home/user/mmseqs/taxonomyResult /home/user/mmseqs/tmp
+
+#because step 2 takes ages we lower the sensitivity 
+
+
+./mmseqs taxonomy -s 1 --max-seqs 100 --search-type 1 --tax-lineage 1 /home/user/mmseqs/queryDB /home/user/mmseqs/protein_db /home/user/mmseqs/taxonomyResult /home/user/mmseqs/tmp
+
+
+./mmseqs createtsv /home/user/mmseqs/queryDB /home/user/mmseqs/taxonomyResult /home/user/mmseqs/taxonomyResult.tsv
+#--------------------
+
+#we run hmmer algorithm to take the PFAM hits of the original and enriched families
+
+hmmsearch --domtblout initial_hits_to_PFAM --cut_tc --cpu 3 --noali Pfam-A.hmm initial_fam.fa
+#do the same for the enriched hits
+hmmsearch --domtblout enrich_hits_to_PFAM --cut_tc --cpu 3 --noali Pfam-A.hmm enrich_metage.fa
+
+## we will take the pfam hits of the enriched and non-enriched families to make plots
+#we keep just the protein domains for the analysis
+awk '{print $1,$4}'  enrich_hits_to_PFAM > enrich_domains.csv
+awk '{print $1,$4}'  initial_hits_to_PFAM.csv > initial_domains.csv
+
+
+#Το Viral Prot.csv είναι το αρχικο αρχείο, το οποιο περιεχει ολες τις πρωτεινες των ιων. Απο αυτο καναμε clustering και φτιαξαμε families. Aναλογως το #index απο το αρχικο αρχειο πηραμε το name της πρωτεινης. Μετα φιλτραραμε και κρατησαμε μονο τα families με πανω απο 20 members. 
+
+#Το βασικο αρχειο ειναι το mcl_viral_clusters.out το οποιο θα φιλτραρουμε για να διαλεξουμε μονο τα 2 members.
+awk ' NF==2 {print $0} '   mcl_viral_clusters.out > clusters_2.tsv
+wc -l clusters_2.tsv 
+
+
+
+
+
